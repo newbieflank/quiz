@@ -1,10 +1,23 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, QuestionRow } from '@/lib/supabase';
+
+interface PublicQuestionRow {
+  id?: string;
+  quiz_code: string;
+  no_soal: number;
+  pertanyaan: string;
+  opsi_a: string;
+  opsi_b: string;
+  opsi_c: string;
+  opsi_d: string;
+  bobot: number;
+}
 
 export default function QuizClient({ quizCode }: { quizCode: string }) {
-  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const normalizedCode = decodeURIComponent(quizCode).toUpperCase();
+
+  const [questions, setQuestions] = useState<PublicQuestionRow[]>([]);
   const [participantName, setParticipantName] = useState('');
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [submittedResult, setSubmittedResult] = useState<{
@@ -12,50 +25,84 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
     total: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     const loadQuiz = async () => {
-      const { data } = await supabase
-        .from('questions')
-        .select('*')
-        .eq('quiz_code', quizCode)
-        .order('no_soal', { ascending: true });
+      setLoading(true);
+      setErrorMsg('');
+      try {
+        const res = await fetch(`/api/quiz/${normalizedCode}`, {
+          cache: 'no-store',
+        });
+        const data = await res.json();
 
-      setQuestions((data as QuestionRow[]) || []);
-      setLoading(false);
+        if (!res.ok) {
+          setErrorMsg(data.error || 'Gagal memuat soal kuis.');
+          setQuestions([]);
+        } else {
+          setQuestions(Array.isArray(data.questions) ? data.questions : []);
+        }
+      } catch {
+        setErrorMsg('Terjadi kesalahan jaringan saat memuat soal.');
+      } finally {
+        setLoading(false);
+      }
     };
+
     loadQuiz();
-  }, [quizCode]);
+  }, [normalizedCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    let score = 0;
-    let total = 0;
+    setSubmitting(true);
+    setErrorMsg('');
 
-    questions.forEach((q) => {
-      total += q.bobot;
-      if (answers[q.no_soal] === q.kunci_jawaban) {
-        score += q.bobot;
+    try {
+      const res = await fetch(`/api/quiz/${normalizedCode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          participantName: participantName.trim() || 'Anonim',
+          answers,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Gagal mengumpulkan jawaban.');
+        setSubmitting(false);
+        return;
       }
-    });
 
-    await supabase.from('submissions').insert({
-      quiz_code: quizCode,
-      participant_name: participantName.trim() || 'Anonim',
-      score,
-      total_points: total,
-      answers,
-    });
-
-    setSubmittedResult({ score, total });
+      setSubmittedResult({
+        score: Number(data.score ?? 0),
+        total: Number(data.total ?? 0),
+      });
+    } catch {
+      setErrorMsg('Gagal mengirim jawaban karena kesalahan jaringan.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  if (loading) return <div className="p-8 text-sm">Memuat soal kuis...</div>;
+  if (loading) {
+    return <div className="p-8 text-sm text-slate-600">Memuat soal kuis...</div>;
+  }
+
+  if (errorMsg) {
+    return (
+      <div className="p-8 text-center text-sm text-red-600">
+        {errorMsg}
+      </div>
+    );
+  }
 
   if (questions.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-slate-600">
-        Belum ada soal untuk kode paket <b>{quizCode}</b>.
+        Belum ada soal untuk kode paket <b>{normalizedCode}</b>.
       </div>
     );
   }
@@ -65,14 +112,16 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="bg-white p-6 rounded-xl border border-slate-200">
           <span className="text-xs font-mono bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">
-            KODE: {quizCode}
+            KODE: {normalizedCode}
           </span>
           <h1 className="text-xl font-bold text-slate-800 mt-2">Lembar Kuis / Ulangan</h1>
         </div>
 
         {submittedResult ? (
           <div className="bg-white p-6 rounded-xl border border-emerald-300 text-center space-y-2">
-            <p className="text-sm text-slate-500">Hasil Pengerjaan ({participantName})</p>
+            <p className="text-sm text-slate-600">
+              Hasil Pengerjaan (<span className="font-medium text-slate-900">{participantName}</span>)
+            </p>
             <p className="text-3xl font-bold text-emerald-600">
               {submittedResult.score} / {submittedResult.total}
             </p>
@@ -81,7 +130,7 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="bg-white p-4 rounded-xl border border-slate-200">
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-slate-700 mb-1">
                 Nama Peserta
               </label>
               <input
@@ -90,7 +139,7 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
                 placeholder="Masukkan nama lengkap..."
                 value={participantName}
                 onChange={(e) => setParticipantName(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 bg-white"
               />
             </div>
 
@@ -99,7 +148,7 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
                 key={q.no_soal}
                 className="bg-white p-5 rounded-xl border border-slate-200 space-y-3"
               >
-                <p className="font-medium text-sm text-slate-800">
+                <p className="font-medium text-sm text-slate-900">
                   {q.no_soal}. {q.pertanyaan}
                 </p>
                 <div className="space-y-2">
@@ -113,7 +162,7 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
                     return (
                       <label
                         key={opt}
-                        className="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer text-sm"
+                        className="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer text-sm text-slate-900"
                       >
                         <input
                           type="radio"
@@ -125,8 +174,8 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
                             setAnswers((prev) => ({ ...prev, [q.no_soal]: opt }))
                           }
                         />
-                        <span className="font-semibold">{opt}.</span>
-                        <span>{q[key]}</span>
+                        <span className="font-semibold text-slate-900">{opt}.</span>
+                        <span className="text-slate-800">{q[key]}</span>
                       </label>
                     );
                   })}
@@ -136,9 +185,10 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
 
             <button
               type="submit"
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 rounded-xl text-sm"
+              disabled={submitting}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl text-sm"
             >
-              Kumpulkan Jawaban
+              {submitting ? 'Mengumpulkan...' : 'Kumpulkan Jawaban'}
             </button>
           </form>
         )}
