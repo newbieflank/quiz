@@ -1,0 +1,250 @@
+'use client';
+
+import { useEffect, useState, use } from 'react';
+import Link from 'next/link';
+import { supabase, QuestionRow } from '@/lib/supabase';
+import { Plus, Save, Trash2, ExternalLink } from 'lucide-react';
+
+const createEmptyRow = (quizCode: string, noSoal: number): QuestionRow => ({
+  quiz_code: quizCode,
+  no_soal: noSoal,
+  pertanyaan: '',
+  opsi_a: '',
+  opsi_b: '',
+  opsi_c: '',
+  opsi_d: '',
+  kunci_jawaban: 'A',
+  bobot: 10,
+});
+
+export default function EditorPage({ params }: { params: Promise<{ code: string }> }) {
+  const { code } = use(params);
+  const quizCode = decodeURIComponent(code).toUpperCase();
+
+  const [quizTitle, setQuizTitle] = useState('');
+  const [rows, setRows] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data: quiz } = await supabase
+        .from('quizzes')
+        .select('*')
+        .eq('code', quizCode)
+        .maybeSingle();
+
+      if (quiz) setQuizTitle(quiz.title);
+
+      const { data: questions } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('quiz_code', quizCode)
+        .order('no_soal', { ascending: true });
+
+      if (questions && questions.length > 0) {
+        setRows(questions as QuestionRow[]);
+      } else {
+        // Otomatis tampilkan 5 baris kosong berkolom jika paket baru
+        setRows(Array.from({ length: 5 }, (_, i) => createEmptyRow(quizCode, i + 1)));
+      }
+      setLoading(false);
+    };
+
+    fetchData();
+  }, [quizCode]);
+
+  const updateCell = <K extends keyof QuestionRow>(
+    index: number,
+    field: K,
+    value: QuestionRow[K]
+  ) => {
+    setRows((prev) =>
+      prev.map((row, idx) => (idx === index ? { ...row, [field]: value } : row))
+    );
+  };
+
+  const addRow = () => {
+    setRows((prev) => [...prev, createEmptyRow(quizCode, prev.length + 1)]);
+  };
+
+  const removeRow = (index: number) => {
+    setRows((prev) =>
+      prev
+        .filter((_, idx) => idx !== index)
+        .map((row, idx) => ({ ...row, no_soal: idx + 1 }))
+    );
+  };
+
+  const handleSaveAll = async () => {
+    setSaving(true);
+    setStatusMsg('');
+
+    // Filter baris yang pertanyaannya terisi
+    const validRows = rows
+      .filter((r) => r.pertanyaan.trim() !== '')
+      .map((r, idx) => ({
+        quiz_code: quizCode,
+        no_soal: idx + 1,
+        pertanyaan: r.pertanyaan,
+        opsi_a: r.opsi_a,
+        opsi_b: r.opsi_b,
+        opsi_c: r.opsi_c,
+        opsi_d: r.opsi_d,
+        kunci_jawaban: r.kunci_jawaban,
+        bobot: Number(r.bobot) || 10,
+      }));
+
+    // Hapus soal lama untuk paket ini lalu insert ulang agar nomor urut bersih
+    await supabase.from('questions').delete().eq('quiz_code', quizCode);
+
+    if (validRows.length > 0) {
+      const { error } = await supabase.from('questions').insert(validRows);
+      if (error) {
+        setStatusMsg(`Gagal menyimpan: ${error.message}`);
+        setSaving(false);
+        return;
+      }
+      setRows(validRows);
+    }
+
+    setSaving(false);
+    setStatusMsg(`Tersimpan (${validRows.length} soal aktif).`);
+  };
+
+  if (loading) {
+    return <div className="p-8 text-sm text-slate-500">Memuat kolom soal...</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto space-y-4">
+        {/* Header Bar */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                {quizCode}
+              </span>
+              <h1 className="text-lg font-bold text-slate-800">{quizTitle || quizCode}</h1>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Isi langsung pada setiap kolom di bawah, lalu klik Simpan Semua.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/quiz/${quizCode}`}
+              target="_blank"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100"
+            >
+              Pratinjau Kuis <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+            <button
+              onClick={addRow}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-900"
+            >
+              <Plus className="w-3.5 h-3.5" /> Tambah Baris
+            </button>
+            <button
+              onClick={handleSaveAll}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" /> {saving ? 'Menyimpan...' : 'Simpan Semua'}
+            </button>
+          </div>
+        </div>
+
+        {statusMsg && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs px-4 py-2.5 rounded-lg">
+            {statusMsg}
+          </div>
+        )}
+
+        {/* Tabel Kolom Soal */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-800 text-white text-left">
+                <th className="p-2.5 border-r border-slate-700 w-12 text-center">No</th>
+                <th className="p-2.5 border-r border-slate-700 min-w-[260px]">Pertanyaan</th>
+                <th className="p-2.5 border-r border-slate-700 min-w-[140px]">Opsi A</th>
+                <th className="p-2.5 border-r border-slate-700 min-w-[140px]">Opsi B</th>
+                <th className="p-2.5 border-r border-slate-700 min-w-[140px]">Opsi C</th>
+                <th className="p-2.5 border-r border-slate-700 min-w-[140px]">Opsi D</th>
+                <th className="p-2.5 border-r border-slate-700 w-20 text-center">Kunci</th>
+                <th className="p-2.5 border-r border-slate-700 w-20 text-center">Bobot</th>
+                <th className="p-2.5 w-12 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {rows.map((row, idx) => (
+                <tr key={idx} className="hover:bg-slate-50 align-top">
+                  <td className="p-2 border-r border-slate-200 text-center font-semibold text-slate-600">
+                    {idx + 1}
+                  </td>
+                  <td className="p-1.5 border-r border-slate-200">
+                    <textarea
+                      rows={2}
+                      value={row.pertanyaan}
+                      onChange={(e) => updateCell(idx, 'pertanyaan', e.target.value)}
+                      placeholder="Tulis pertanyaan..."
+                      className="w-full p-1.5 border border-transparent focus:border-blue-400 focus:bg-blue-50/30 rounded outline-none resize-y"
+                    />
+                  </td>
+                  {(['opsi_a', 'opsi_b', 'opsi_c', 'opsi_d'] as const).map((field) => (
+                    <td key={field} className="p-1.5 border-r border-slate-200">
+                      <input
+                        type="text"
+                        value={row[field]}
+                        onChange={(e) => updateCell(idx, field, e.target.value)}
+                        placeholder={`Jawaban ${field.slice(-1).toUpperCase()}`}
+                        className="w-full p-1.5 border border-transparent focus:border-blue-400 focus:bg-blue-50/30 rounded outline-none"
+                      />
+                    </td>
+                  ))}
+                  <td className="p-1.5 border-r border-slate-200 text-center">
+                    <select
+                      value={row.kunci_jawaban}
+                      onChange={(e) =>
+                        updateCell(idx, 'kunci_jawaban', e.target.value as 'A' | 'B' | 'C' | 'D')
+                      }
+                      className="p-1.5 border border-slate-300 rounded bg-white font-semibold"
+                    >
+                      <option value="A">A</option>
+                      <option value="B">B</option>
+                      <option value="C">C</option>
+                      <option value="D">D</option>
+                    </select>
+                  </td>
+                  <td className="p-1.5 border-r border-slate-200 text-center">
+                    <input
+                      type="number"
+                      min={1}
+                      value={row.bobot}
+                      onChange={(e) => updateCell(idx, 'bobot', Number(e.target.value))}
+                      className="w-14 p-1.5 border border-slate-300 rounded text-center"
+                    />
+                  </td>
+                  <td className="p-1.5 text-center">
+                    <button
+                      type="button"
+                      onClick={() => removeRow(idx)}
+                      title="Hapus baris"
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
