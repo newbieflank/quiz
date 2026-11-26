@@ -10,7 +10,9 @@ export async function GET(
 
   const { data, error } = await supabaseAdmin
     .from('questions')
-    .select('id, quiz_code, no_soal, pertanyaan, opsi_a, opsi_b, opsi_c, opsi_d, bobot')
+    .select(
+      'id, quiz_code, no_soal, pertanyaan, image_url, opsi_a, opsi_b, opsi_c, opsi_d, bobot'
+    )
     .eq('quiz_code', quizCode)
     .order('no_soal', { ascending: true });
 
@@ -27,7 +29,17 @@ export async function POST(
 ) {
   const { code } = await params;
   const quizCode = decodeURIComponent(code).toUpperCase();
-  const { participantName, answers } = await req.json();
+  const body = await req.json();
+  const participantName = String(body?.participantName ?? '').trim();
+  const answers =
+    body?.answers && typeof body.answers === 'object' ? body.answers : {};
+
+  if (!participantName) {
+    return NextResponse.json(
+      { error: 'Nama peserta wajib diisi.' },
+      { status: 400 }
+    );
+  }
 
   const { data: questions, error } = await supabaseAdmin
     .from('questions')
@@ -50,10 +62,10 @@ export async function POST(
 
   const { error: insertError } = await supabaseAdmin.from('submissions').insert({
     quiz_code: quizCode,
-    participant_name: String(participantName || 'Anonim').trim(),
+    participant_name: participantName,
     score,
     total_points: total,
-    answers: answers || {},
+    answers,
   });
 
   if (insertError) {

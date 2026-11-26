@@ -7,6 +7,7 @@ interface PublicQuestionRow {
   quiz_code: string;
   no_soal: number;
   pertanyaan: string;
+  image_url?: string | null;
   opsi_a: string;
   opsi_b: string;
   opsi_c: string;
@@ -92,11 +93,7 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
   }
 
   if (errorMsg) {
-    return (
-      <div className="p-8 text-center text-sm text-red-600">
-        {errorMsg}
-      </div>
-    );
+    return <div className="p-8 text-center text-sm text-red-600">{errorMsg}</div>;
   }
 
   if (questions.length === 0) {
@@ -120,7 +117,8 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
         {submittedResult ? (
           <div className="bg-white p-6 rounded-xl border border-emerald-300 text-center space-y-2">
             <p className="text-sm text-slate-600">
-              Hasil Pengerjaan (<span className="font-medium text-slate-900">{participantName}</span>)
+              Hasil Pengerjaan (
+              <span className="font-medium text-slate-900">{participantName}</span>)
             </p>
             <p className="text-3xl font-bold text-emerald-600">
               {submittedResult.score} / {submittedResult.total}
@@ -151,6 +149,15 @@ export default function QuizClient({ quizCode }: { quizCode: string }) {
                 <p className="font-medium text-sm text-slate-900">
                   {q.no_soal}. {q.pertanyaan}
                 </p>
+
+                {q.image_url && (
+                  <img
+                    src={q.image_url}
+                    alt={`Ilustrasi soal nomor ${q.no_soal}`}
+                    className="max-h-64 w-auto rounded-lg border border-slate-200 object-contain bg-slate-50"
+                  />
+                )}
+
                 <div className="space-y-2">
                   {(['A', 'B', 'C', 'D'] as const).map((opt) => {
                     const key = `opsi_${opt.toLowerCase()}` as

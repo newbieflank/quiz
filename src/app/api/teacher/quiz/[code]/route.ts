@@ -60,17 +60,27 @@ export async function POST(
       .maybeSingle();
 
     if (!existing) {
-      await supabaseAdmin.from('quizzes').insert({
+      const { error: insertQuizErr } = await supabaseAdmin.from('quizzes').insert({
         code: quizCode,
         title: String(body?.title || `Paket Kuis ${quizCode}`).trim(),
       });
+      if (insertQuizErr) {
+        return NextResponse.json({ error: insertQuizErr.message }, { status: 500 });
+      }
     }
     return NextResponse.json({ ok: true });
   }
 
   if (body?.action === 'save_questions') {
     const rows = Array.isArray(body?.rows) ? body.rows : [];
-    await supabaseAdmin.from('questions').delete().eq('quiz_code', quizCode);
+    const { error: deleteErr } = await supabaseAdmin
+      .from('questions')
+      .delete()
+      .eq('quiz_code', quizCode);
+
+    if (deleteErr) {
+      return NextResponse.json({ error: deleteErr.message }, { status: 500 });
+    }
 
     if (rows.length > 0) {
       const cleaned = rows.map((r: Record<string, unknown>, idx: number) => ({
@@ -82,6 +92,10 @@ export async function POST(
         opsi_c: String(r.opsi_c || ''),
         opsi_d: String(r.opsi_d || ''),
         kunci_jawaban: String(r.kunci_jawaban || 'A'),
+        image_url:
+          typeof r.image_url === 'string' && r.image_url.trim() !== ''
+            ? r.image_url.trim()
+            : null,
         bobot: Number(r.bobot) || 10,
       }));
 
